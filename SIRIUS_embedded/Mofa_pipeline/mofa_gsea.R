@@ -15,6 +15,7 @@
 #   SECTION 6  — plot_enrichment_detailed (gènes contributeurs)
 #   SECTION 7  — Comparaison deux tests   (histogrammes + scatter)
 #   SECTION 8  — Export CSV des résultats (p-values, p-adj, statistiques)
+#   PLOT F     — Proportions top-level Reactome (stacked bar, figure article)
 # =============================================================================
 
 suppressMessages({
@@ -579,6 +580,156 @@ if (analysis == "gsea_full_report") {
 
   dev.off()
   cat(sprintf("  ✓ Rapport complet enregistré : %s\n\n", outfile))
+}
+
+# =============================================================================
+# PLOT F — Proportions top-level Reactome par facteur (stacked bar)
+# analysis == "gsea_reactome_toplevel"
+#
+# Paramètres utilisés (tous déjà présents dans params) :
+#   factors_gsea   — facteurs à afficher  (ex: "1,2,5")
+#   fdr_threshold  — seuil FDR pour filtrer les pathways (défaut 0.05)
+#   result_type    — "positive" | "negative" | "all"   (défaut "positive")
+#   load_result    — "TRUE" pour recharger depuis res_*.rds sur disque
+#   geneset_source — doit être "reactome" (sinon catégories non définies)
+# =============================================================================
+
+if (analysis == "gsea_reactome_toplevel") {
+
+  cat("[PLOT F] Proportions top-level Reactome — stacked bar...\n")
+
+  # ── 1. Charger le résultat d'enrichissement --------------------------------
+  if (isTRUE(load_result == "TRUE") && !is.null(result_type)) {
+    load_enrichment_results()
+    enr_f <- switch(result_type,
+      "positive" = enrichment_positive,
+      "negative" = enrichment_negative,
+      enrichment_result
+    )
+  } else {
+    enr_f <- enrichment_result
+  }
+
+  if (is.null(enr_f)) {
+    cat("  [ERREUR] Aucun résultat d'enrichissement disponible.\n")
+    cat("  Lancez d'abord analysis=gsea_positive/gsea_negative ou analysis=gsea_run.\n")
+    quit(status = 1)
+  }
+
+  # ── 2. Mapping pathway → catégorie top-level Reactome ----------------------
+  assign_toplevel <- function(pw) {
+    dplyr::case_when(
+      grepl("CELL_CYCLE",                          pw, ignore.case = TRUE) ~ "Cell Cycle",
+      grepl("DNA_REPAIR",                          pw, ignore.case = TRUE) ~ "DNA Repair",
+      grepl("DNA_REPLICATION",                     pw, ignore.case = TRUE) ~ "DNA Replication",
+      grepl("EXTRACELLULAR_MATRIX|ECM_ORGANIZAT",  pw, ignore.case = TRUE) ~ "ECM organization",
+      grepl("IMMUNE_SYSTEM|INNATE_IMMUNE|ADAPTIVE", pw, ignore.case = TRUE) ~ "Immune System",
+      grepl("METABOLISM",                          pw, ignore.case = TRUE) ~ "Metabolism",
+      grepl("NEURONAL|NERVOUS_SYSTEM|NEUROTRANSM", pw, ignore.case = TRUE) ~ "Neuronal System",
+      grepl("SIGNAL_TRANSDUCTION|SIGNALING",       pw, ignore.case = TRUE) ~ "Signal Transduction",
+      grepl("TRANSPORT",                           pw, ignore.case = TRUE) ~ "Transport",
+      TRUE                                                                  ~ "Other"
+    )
+  }
+
+  # ── 3. Extraire les p-values ajustées et filtrer ---------------------------
+  padj_mat <- enr_f$pval.adj
+  factor_cols <- colnames(padj_mat)
+  factor_names_wanted <- paste0("Factor", factors_parsed)
+  factor_cols_sel <- intersect(factor_names_wanted, factor_cols)
+
+  if (length(factor_cols_sel) == 0) {
+    cat("  [ERREUR] Aucun des facteurs demandés n'est présent dans les résultats.\n")
+    cat("  Facteurs disponibles :", paste(factor_cols, collapse = ", "), "\n")
+    quit(status = 1)
+  }
+
+  padj_sel <- padj_mat[, factor_cols_sel, drop = FALSE]
+
+  suppressMessages(library(tidyr))
+  suppressMessages(library(dplyr))
+  suppressMessages(library(scales))
+
+  dt_long <- as.data.frame(padj_sel) |>
+    tibble::rownames_to_column("pathway") |>
+    tidyr::pivot_longer(cols = -pathway,
+                        names_to  = "factor",
+                        values_to = "padj") |>
+    dplyr::filter(!is.na(padj), padj < fdr_threshold) |>
+    dplyr::mutate(category = assign_toplevel(pathway))
+
+  if (nrow(dt_long) == 0) {
+    cat(sprintf("  [AVERT.] Aucun pathway significatif (FDR < %.2f).\n", fdr_threshold))
+    cat("  Le plot ne sera pas généré.\n\n")
+  } else {
+
+    # ── 4. Proportions --------------------------------------------------------
+    category_levels <- c("Cell Cycle", "DNA Repair", "DNA Replication",
+                         "ECM organization", "Immune System", "Metabolism",
+                         "Neuronal System", "Other", "Signal Transduction", "Transport")
+    category_colors <- c(
+      "Cell Cycle"          = "#F28B82",
+      "DNA Repair"          = "#3D6B35",
+      "DNA Replication"     = "#6D9B3A",
+      "ECM organization"    = "#52B788",
+      "Immune System"       = "#56CFD2",
+      "Metabolism"          = "#4169E1",
+      "Neuronal System"     = "#AED6F1",
+      "Other"               = "#C0C0C0",
+      "Signal Transduction" = "#FF69B4",
+      "Transport"           = "#D8B4FE"
+    )
+
+    factor_label_fn <- function(x) sub("Factor", "Factor ", x)
+
+    prop_df <- dt_long |>
+      dplyr::count(factor, category) |>
+      dplyr::group_by(factor) |>
+      dplyr::mutate(proportion = n / sum(n)) |>
+      dplyr::ungroup() |>
+      dplyr::mutate(
+        factor   = factor(factor,   levels = factor_cols_sel),
+        category = factor(category, levels = category_levels)
+      )
+
+    # ── 5. Plot ---------------------------------------------------------------
+    p_toplevel <- ggplot(prop_df, aes(x = factor, y = proportion, fill = category)) +
+      geom_bar(stat = "identity", width = 0.7, color = "white", linewidth = 0.3) +
+      scale_x_discrete(labels = factor_label_fn) +
+      scale_y_continuous(
+        labels = scales::percent_format(accuracy = 1),
+        breaks = seq(0, 1, 0.25),
+        expand = c(0, 0)
+      ) +
+      scale_fill_manual(values = category_colors, name = "Pathway Category", drop = FALSE) +
+      labs(
+        title = "Top-Level Reactome Pathways \u2014 MOFA Factors",
+        x     = NULL,
+        y     = "Proportion"
+      ) +
+      theme_classic(base_size = 13) +
+      theme(
+        plot.title      = element_text(face = "bold", size = 13),
+        legend.position = "right",
+        axis.line       = element_line(color = "black"),
+        panel.grid      = element_blank()
+      )
+
+    # ── 6. Sauvegarde ---------------------------------------------------------
+    outfile_f  <- file.path(work_dir, paste0(out_name, "_reactome_toplevel.pdf"))
+    png_path_f <- file.path(work_dir, paste0(out_name, "_reactome_toplevel_preview.png"))
+    csv_path_f <- file.path(work_dir, paste0(out_name, "_reactome_toplevel_proportions.csv"))
+
+    if (!preview_only) {
+      ggsave(outfile_f, plot = p_toplevel, width = 8, height = 6)
+      cat(sprintf("  \u2713 PDF : %s\n", outfile_f))
+    }
+    ggsave(png_path_f, plot = p_toplevel, width = 8, height = 6, dpi = 150)
+    cat(sprintf("  \u2713 PNG preview : %s\n", png_path_f))
+
+    write.csv(prop_df, csv_path_f, row.names = FALSE)
+    cat(sprintf("  \u2713 CSV proportions : %s\n\n", csv_path_f))
+  }
 }
 
 # =============================================================================

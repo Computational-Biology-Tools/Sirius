@@ -29,6 +29,9 @@ Environment:
       mofa_plots.R      → generates all visualisation plots
       mofa_survival.R   → Cox HR and Kaplan-Meier analyses
       mofa_gsea.R       → gene set enrichment analysis
+                           PLOT F: analysis=gsea_reactome_toplevel génère un stacked bar
+                           des proportions de catégories Reactome top-level par facteur MOFA.
+                           Sorties : *_reactome_toplevel.pdf / .png / _proportions.csv
   - Model output        : <work_dir>/model.hdf5   (HDF5, reloadable with loadModel())
   - Plots output        : <work_dir>/<out_name>.pdf  or  <work_dir>/<out_name>.png
   - Pipeline log        : visible in the Log panel of the UI (stdout + stderr from R)

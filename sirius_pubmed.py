@@ -5,6 +5,7 @@ from typing import Iterable
 import urllib.parse
 import urllib.request
 import json
+import re
 import xml.etree.ElementTree as ET
 
 
@@ -92,30 +93,42 @@ class PubMedClient:
         return articles
 
 
+_STRUCTURAL_PATTERNS = re.compile(
+    r"""
+    \bpmid\s*:?\s*\d{6,9}\b
+    | \b10\.\d{4,}/\S+
+    | \bncbi\.nlm\.nih\.gov\b
+    | \bpubmed\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_KEYWORD_WEIGHTS: dict[str, int] = {
+    "literature":   3,
+    "bibliography": 3,
+    "citation":     2,  "citations":  2,
+    "reference":    2,  "references": 2,
+    "abstract":     2,
+    "étude":        1,  "études":     1,
+    "etude":        1,  "etudes":     1,
+    "paper":        1,  "papers":     1,
+    "article":      1,  "articles":   1,
+    "evidence":     1,
+}
+
+_KEYWORD_THRESHOLD = 3
+
+
 def looks_like_pubmed_request(text: str) -> bool:
+    if _STRUCTURAL_PATTERNS.search(text):
+        return True
     t = text.lower()
-    keys = (
-        "pubmed",
-        "pmid",
-        "paper",
-        "papers",
-        "article",
-        "articles",
-        "literature",
-        "bibliography",
-        "reference",
-        "references",
-        "citation",
-        "citations",
-        "doi",
-        "evidence",
-        "evidences",
-        "etude",
-        "etudes",
-        "étude",
-        "études",
+    score = sum(
+        weight
+        for keyword, weight in _KEYWORD_WEIGHTS.items()
+        if keyword in t
     )
-    return any(k in t for k in keys)
+    return score >= _KEYWORD_THRESHOLD
 
 
 def build_pubmed_context(articles: list[PubMedArticle], max_chars: int = 9000) -> str:

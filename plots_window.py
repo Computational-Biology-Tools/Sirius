@@ -1358,6 +1358,7 @@ class PlotsWindow(ctk.CTkToplevel):
         self.gsea_result_type = tk.StringVar(value="positive")
         self.gsea_factor_plot = tk.StringVar(value="5")
         self.gsea_max_pathways = tk.StringVar(value="15")
+        self.gsea_fdr = tk.StringVar(value="0.05")
 
         pane = ctk.CTkFrame(tab, fg_color=BG_DARK)
         pane.pack(fill="both", expand=True)
@@ -1401,6 +1402,7 @@ class PlotsWindow(ctk.CTkToplevel):
         row("geneset_source", self.gsea_source, ["reactome", "msigdb_c2_human", "msigdb_c5_human", "msigdb_c2_mouse", "msigdb_c5_mouse", "custom"], 6)
         row("factor_plot", self.gsea_factor_plot, None, 7)
         row("max_pathways", self.gsea_max_pathways, None, 8)
+        row("fdr_threshold", self.gsea_fdr, None, 9)
 
         btn_row = ctk.CTkFrame(left, fg_color=BG_DARK)
         btn_row.pack(fill="x", padx=8, pady=(6, 8))
@@ -1427,6 +1429,18 @@ class PlotsWindow(ctk.CTkToplevel):
             command=self._save_gsea_pdf,
         )
         self._btn_gsea_save_pdf.grid(row=0, column=1, padx=(4, 0), sticky="ew")
+
+        # Dedicated button: GSEA Reactome top-level (2-phase pipeline)
+        self._btn_gsea_reactome_toplevel = ctk.CTkButton(
+            left,
+            text="GSEA Reactome top-level (stacked bar)",
+            fg_color="#1A6B5A",
+            hover_color="#0F4D40",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=40,
+            command=self._run_gsea_reactome_toplevel,
+        )
+        self._btn_gsea_reactome_toplevel.pack(fill="x", padx=8, pady=(0, 8))
 
         _ghdr = ctk.CTkFrame(right, fg_color="transparent")
         _ghdr.pack(fill="x", padx=8, pady=(10, 2))
@@ -1537,3 +1551,106 @@ class PlotsWindow(ctk.CTkToplevel):
             self.after(0, done)
 
         threading.Thread(target=run, daemon=True).start()  # Added parentheses here
+
+    def _run_gsea_reactome_toplevel(self):
+        """Run the 2-phase GSEA Reactome top-level pipeline:
+        phase 1 = compute enrichment (gsea_positive/negative/run),
+        phase 2 = generate the stacked-bar plot (gsea_reactome_toplevel).
+        """
+        ok, err = self._validate_paths()
+        if not ok:
+            messagebox.showerror("Error", err)
+            return
+
+        wd      = self.work_dir_var.get().strip()
+        mp      = self.model_path_var.get().strip()
+        sign    = self.gsea_sign.get().strip() or "positive"
+        factors = self.gsea_factors.get().strip() or "1,2,5"
+        view    = self.gsea_view.get().strip() or "mRNA"
+        source  = self.gsea_source.get().strip() or "reactome"
+        try:
+            fdr = float(self.gsea_fdr.get().strip() or "0.05")
+        except ValueError:
+            fdr = 0.05
+
+        if source != "reactome":
+            messagebox.showwarning(
+                "Reactome required",
+                "Le top-level Reactome nécessite geneset_source=reactome.\n"
+                "Le paramètre va être forcé à 'reactome' pour cette analyse.",
+            )
+
+        compute_analysis = f"gsea_{sign}" if sign in ("positive", "negative") else "gsea_run"
+        out_name = "gsea_reactome"
+
+        extra_compute = {
+            "view_gsea":      view,
+            "factors_gsea":   factors,
+            "sign_gsea":      sign,
+            "stat_test":      self.gsea_test.get().strip() or "parametric",
+            "geneset_source": "reactome",
+            "custom_gs_path": "",
+            "gene_case":      "upper",
+            "fdr_threshold":  str(fdr),
+        }
+        extra_plot = {
+            **extra_compute,
+            "load_result": "TRUE",
+            "result_type": sign if sign in ("positive", "negative") else "positive",
+        }
+
+        self._btn_gsea_reactome_toplevel.configure(state="disabled", text="GSEA running…")
+        self._gsea_preview_label.configure(text="Running GSEA Reactome top-level…", image=None)
+        self._gsea_preview_image = None
+        self._log("\n[GSEA] Démarrage GSEA Reactome top-level…\n")
+
+        def run_thread():
+            self.after(0, self._log,
+                       f"[GSEA] Phase 1 — run_enrichment ({compute_analysis})…\n")
+            code1, log1 = run_mofa_gsea(
+                work_dir=wd, model_path=mp,
+                analysis=compute_analysis, out_name=out_name,
+                extra_params=extra_compute,
+            )
+            self.after(0, self._log, log1 + "\n")
+            if code1 != 0:
+                self.after(0, self._on_gsea_reactome_done, False,
+                           f"Erreur phase 1 (code {code1}). Voir le log.")
+                return
+
+            self.after(0, self._log, "[GSEA] Phase 2 — gsea_reactome_toplevel plot…\n")
+            code2, log2 = run_mofa_gsea(
+                work_dir=wd, model_path=mp,
+                analysis="gsea_reactome_toplevel", out_name=out_name,
+                extra_params=extra_plot,
+            )
+            self.after(0, self._log, log2 + "\n")
+            self.after(0, self._on_gsea_reactome_done, code2 == 0,
+                       "" if code2 == 0 else f"Erreur phase 2 (code {code2}). Voir le log.")
+
+        threading.Thread(target=run_thread, daemon=True).start()
+
+    def _on_gsea_reactome_done(self, success: bool, error_msg: str = ""):
+        self._btn_gsea_reactome_toplevel.configure(
+            state="normal",
+            text="GSEA Reactome top-level (stacked bar)",
+        )
+        if success:
+            wd = self.work_dir_var.get().strip()
+            self._log(
+                "\n[GSEA] ✓ Terminé. Fichiers générés :\n"
+                "  • gsea_reactome_reactome_toplevel.pdf\n"
+                "  • gsea_reactome_reactome_toplevel_preview.png\n"
+                "  • gsea_reactome_reactome_toplevel_proportions.csv\n\n"
+            )
+            self._load_preview(
+                wd, "gsea_reactome_reactome_toplevel",
+                label=self._gsea_preview_label,
+            )
+        else:
+            self._safe_configure_label(
+                self._gsea_preview_label,
+                text="GSEA Reactome top-level failed. See log.",
+                image=None,
+            )
+            messagebox.showerror("GSEA Reactome — Erreur", error_msg)
