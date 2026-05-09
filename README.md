@@ -6,6 +6,17 @@
 
 AI Sirius is an intelligent bioinformatics agent designed to automate and assist multi-omics analysis in the context of precision medicine. It combines a desktop graphical interface (CustomTkinter) with an R-based analytical pipeline built on MOFA2 (Multi-Omics Factor Analysis v2), a Bayesian latent factor model that simultaneously integrates multiple omics layers — mutations, methylation, mRNA, miRNA, proteomics — to identify coordinated and interpretable sources of biological variation. The agent is powered by an LLM (Ollama, Claude, or DeepSeek) that guides the user at every step of the analysis, interprets results, diagnoses pipeline errors, and automatically searches for evidence in the PubMed literature.
 
+<p align="center">
+  <a href="https://youtu.be/U1vsQ8w9eLI">
+    <img src="https://img.youtube.com/vi/U1vsQ8w9eLI/maxresdefault.jpg" 
+         alt="Watch the Sirius AI demo on YouTube" width="640">
+  </a>
+</p>
+
+<p align="center">
+  ▶️ <strong><a href="https://youtu.be/U1vsQ8w9eLI">Watch the demo on YouTube</a></strong>
+</p>
+
 ### AI Sirius MOFA — 面向多组学分析与精准医学的智能代理
 
 AI Sirius MOFA 是一款智能生物信息学代理，专为精准医学场景下的多组学分析自动化与辅助而设计。它将桌面图形界面（CustomTkinter）与基于 MOFA2（多组学因子分析 v2）的 R 分析流程相结合。MOFA2 是一种贝叶斯潜因子模型，可同时整合多个组学层——突变、甲基化、mRNA、miRNA、蛋白质组——以识别具有生物学意义的协同变异来源。该代理由大语言模型（Ollama、Claude 或 DeepSeek）驱动，在分析的每个步骤为用户提供指导，解释结果，诊断流程错误，并自动检索 PubMed 文献证据。
